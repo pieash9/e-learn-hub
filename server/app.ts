@@ -3,6 +3,7 @@ import "dotenv/config";
 export const app = express();
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import errorMiddleware from "./middleware/error";
 
 // body parser
 app.use(express.json({ limit: "50mb" }));
@@ -28,3 +29,5 @@ app.use("*", (req: Request, res: Response, next: NextFunction) => {
   const err = new Error(`Route not found - ${req.originalUrl}`) as any;
   (err.statusCode = 404), next(err);
 });
+
+app.use(errorMiddleware);
