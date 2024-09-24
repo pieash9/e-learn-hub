@@ -2,11 +2,16 @@ import { Request, Response, NextFunction } from "express";
 import CatchAsyncError from "../middleware/catchAsyncErrors";
 import ErrorHandler from "../utils/ErrorHandler";
 import userModel, { IUser } from "../models/user.model";
-import jwt from "jsonwebtoken";
+import jwt, { JwtPayload } from "jsonwebtoken";
 import ejs from "ejs";
 import path from "path";
 import sendMail from "../utils/sendMail";
-import { sendToken } from "../utils/jwt";
+import {
+  accessTokenOptions,
+  refreshTokenOptions,
+  sendToken,
+} from "../utils/jwt";
+import { redis } from "../utils/redis";
 
 // register user
 interface IRegistrationBody {
@@ -163,10 +168,61 @@ export const logoutUser = CatchAsyncError(
     try {
       res.cookie("access_token", "", { maxAge: 1 });
       res.cookie("refresh_token", "", { maxAge: 1 });
-
+      const userId = (req.user?._id as string) || "";
+      redis.del(userId);
       res.status(200).json({
         success: true,
         message: "Logged out successfully",
+      });
+    } catch (error: any) {
+      return next(new ErrorHandler(error.message, 400));
+    }
+  }
+);
+
+// update access token
+export const updateAccessToken = CatchAsyncError(
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const refresh_token = req.cookies.refresh_token as string;
+      const decode = jwt.verify(
+        refresh_token,
+        process.env.REFRESH_TOKEN as string
+      ) as JwtPayload;
+
+      const message = "Could not update access token";
+      if (!decode) {
+        return new ErrorHandler(message, 400);
+      }
+      const session = await redis.get(decode.id as string);
+
+      if (!session) {
+        return new ErrorHandler(message, 400);
+      }
+
+      const user = JSON.parse(session) as IUser;
+      const accessToken = jwt.sign(
+        { id: user._id as string },
+        process.env.ACCESS_TOKEN as string,
+        {
+          expiresIn: "5m",
+        }
+      );
+
+      const refreshToken = jwt.sign(
+        { id: user._id as string },
+        process.env.REFRESH_TOKEN as string,
+        {
+          expiresIn: "3d",
+        }
+      );
+
+      res.cookie("access_token", accessToken, accessTokenOptions);
+      res.cookie("refresh_token", refreshToken, refreshTokenOptions);
+
+      res.status(200).json({
+        status: "success",
+        accessToken,
       });
     } catch (error: any) {
       return next(new ErrorHandler(error.message, 400));
